@@ -169,8 +169,8 @@ _POD_CONFIG_TEMPLATE = r"""
 """
 
 # Following const values are used to automatically set the computational flags.
-_WGS_MODEL_IDENTIFIER = 'wgs_standard'
-_WES_MODEL_IDENTIFIER = 'wes_standard'
+_WGS_STANDARD = 'wgs_standard'
+_WES_STANDARD = 'wes_standard'
 _WES_LARGE_THR = 12 * 1024 * 1024 * 1024
 _WGS_LARGE_THR = 200 * 1024 * 1024 * 1024
 _WGS_SMALL_THR = 25 * 1024 * 1024 * 1024
@@ -341,14 +341,14 @@ def _get_gcs_object_size(gcs_obj_path):
   Args:
     gcs_obj_path: (str) a path to an obj on GCS.
   """
+  if not _gcs_object_exist(gcs_obj_path):
+    return 0
   storage_client = storage.Client()
   bucket_name = _get_gcs_bucket(gcs_obj_path)
   obj_name = _get_gcs_relative_path(gcs_obj_path)
   bucket = storage_client.get_bucket(bucket_name)
   blob = bucket.get_blob(obj_name)
-  if blob.exists():
-    return blob.size
-  return 0
+  return blob.size
 
 
 def _can_write_to_bucket(bucket_name):
@@ -399,10 +399,10 @@ def _get_bam_category(pipeline_args):
   """Returns the category that input BAM files belongs to."""
   bam_size = _get_gcs_object_size(pipeline_args.bam)
   if bam_size == 0:
-    logging.error('Size of input bam file is 0.')
+    logging.warning('Size of input bam file is 0.')
 
-  is_wes = pipeline_args.model.find(_WES_MODEL_IDENTIFIER) != -1
-  is_wgs = pipeline_args.model.find(_WGS_MODEL_IDENTIFIER) != -1
+  is_wes = pipeline_args.model.find(_WES_STANDARD) != -1
+  is_wgs = pipeline_args.model.find(_WGS_STANDARD) != -1
 
   if is_wes:
     if bam_size < _WES_LARGE_THR:
@@ -419,8 +419,9 @@ def _get_bam_category(pipeline_args):
       return BamCategories.WGS_MEDIUM
 
 
-def _set_args_using_optimized_default_flags(default_flags, pipeline_args):
-  """Sets pipeline args using the set of given default flag values."""
+def _set_args_based_on_bam_category(bam_category, pipeline_args):
+  """Sets pipeline args using the given bam_category and default flag values."""
+  default_flags = _DEFAULT_FLAGS[bam_category]
   pipeline_args.shards = (
       default_flags['make_examples_workers'] *
       default_flags['make_examples_cores_per_worker'])
@@ -458,8 +459,8 @@ def _set_computational_flags_based_on_bam_size(pipeline_args):
   if not (pipeline_args.docker_image and pipeline_args.docker_image_gpu):
     raise ValueError('both --docker_image and --docker_image_gpu must be '
                      'provided with --set_optimized_flags_based_on_bam_size')
-  is_wes = pipeline_args.model.find(_WES_MODEL_IDENTIFIER) != -1
-  is_wgs = pipeline_args.model.find(_WGS_MODEL_IDENTIFIER) != -1
+  is_wes = pipeline_args.model.find(_WES_STANDARD) != -1
+  is_wgs = pipeline_args.model.find(_WGS_STANDARD) != -1
   if is_wes == is_wgs:
     raise ValueError('Unable to automatically set computational flags. Given '
                      'model is neither WGS nor WES: %s' % pipeline_args.model)
@@ -468,8 +469,7 @@ def _set_computational_flags_based_on_bam_size(pipeline_args):
         'Only able to automatically set computational flags for BAM files.')
 
   bam_category = _get_bam_category(pipeline_args)
-  _set_args_using_optimized_default_flags(_DEFAULT_FLAGS[bam_category],
-                                          pipeline_args)
+  _set_args_based_on_bam_category(bam_category, pipeline_args)
 
 
 def _run_make_examples(pipeline_args):
